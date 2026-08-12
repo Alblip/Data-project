@@ -44,3 +44,22 @@ plt.xlabel('Year')
 plt.ylabel('Gini coefficient')
 plt.title('Gini coefficient for Denmark over time')
 plt.show()
+
+#importing the data from DST IFOR32
+IFOR32 = DstApi('IFOR32')
+IFOR32.tablesummary(language='en')
+
+#download parameters for IFOR32
+params = {
+    'table': 'IFOR32',
+    'format': 'BULK',
+    'lang': 'en',
+    'variables': [
+        {'code': 'DECILGEN', 'values': ['*']},
+        {'code': 'KOMMUNEDK', 'values': ['000']},
+        {'code': 'Tid', 'values': ['*']},
+    ]
+}
+
+Income = IFOR32.get_data(params=params)
+display(Income)
