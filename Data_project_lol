@@ -5,3 +5,25 @@ from IPython.display import display
 #API
 %pip install git+https://github.com/alemartinello/dstapi
 from dstapi import DstApi
+
+#importing the data from DST
+IFOR41 = DstApi('IFOR41')
+IFOR41.tablesummary(language='en')
+
+
+#download parameters
+params = {
+    'table': 'IFOR41',
+    'format': 'BULK',
+    'lang': 'en',
+    'variables': [
+        {'code': 'ULLIG', 'values': ['70']},       # Gini coefficient
+        {'code': 'KOMMUNEDK', 'values': ['000']},  # All Denmark
+        {'code': 'Tid', 'values': ['*']},          # all years
+    ]
+}
+
+Gini = IFOR41.get_data(params=params)
+
+display(Gini.head(5))
+display(Gini.info())
