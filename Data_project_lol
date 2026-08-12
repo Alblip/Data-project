@@ -1,6 +1,7 @@
 #SETUP
 import pandas as pd
 from IPython.display import display
+import matplotlib.pyplot as plt
 
 #API
 %pip install git+https://github.com/alemartinello/dstapi
@@ -17,13 +18,29 @@ params = {
     'format': 'BULK',
     'lang': 'en',
     'variables': [
-        {'code': 'ULLIG', 'values': ['70']},       # Gini coefficient
-        {'code': 'KOMMUNEDK', 'values': ['000']},  # All Denmark
-        {'code': 'Tid', 'values': ['*']},          # all years
+        {'code': 'ULLIG', 'values': ['70']},
+        {'code': 'KOMMUNEDK', 'values': ['000']},
+        {'code': 'Tid', 'values': ['*']},
     ]
 }
-
 Gini = IFOR41.get_data(params=params)
 
-display(Gini.head(5))
-display(Gini.info())
+Gini['TID'] = Gini['TID'].astype(int)
+Gini['INDHOLD'] = Gini['INDHOLD'].astype(float)
+
+Gini = Gini.drop(columns=['ULLIG', 'KOMMUNEDK'])
+
+Gini = Gini.rename(columns={
+    'INDHOLD': 'Gini',
+    'TID': 'year'
+})
+
+Gini = Gini.set_index('year').sort_index()
+display(Gini)
+
+#plotting GINI
+Gini.plot()
+plt.xlabel('Year')
+plt.ylabel('Gini coefficient')
+plt.title('Gini coefficient for Denmark over time')
+plt.show()
