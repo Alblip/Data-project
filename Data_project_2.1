@@ -1,1 +1,161 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
+
+#THE MODEL
+
+params = {
+    "N": 50_000, #Individuals
+    "p_e": (0.40, 0.35, 0.25), #short, medium, or long education probabilities
+    "S_e": (1, 3, 5), #years of education for short, medium, or long education
+    "h_e0": (1.00, 1.20, 1.55), #initial human capital for short, medium, or long education
+    "delta_e": (0.010, 0.020, 0.030), #human capital growth while employed for short, medium, or long education
+    "delta": 0.06, #human capital depreciation while unemployed
+    "sigma_psi": 0.10, #standard deviation of log-normal distribution for individual productivity shocks
+    "lambda": 0.60, #probability of finding job while unemployed
+    "sigma": 0.05, #probability of losing job while employed
+    "y_su": 0.45, #student grant while in education
+    "rho": 0.60, #replacement rate for the unemployed
+    "y_floor": 0.35, #minimum income for the unemployed
+    "age_start": 18,
+    "age_end": 65,
+    "seed": 2025,
+}
+
+#Random number generator for reproducibility
+rng = np.random.default_rng(params["seed"])
+
+#Education level simulation function
+def sim_edu(N, p_e, rng):
+    #Education of 0 = short, 1 = medium, 2 = long given probabilities p_e 
+    edu = rng.choice(len(params["p_e"]), size=N, p=p_e)
+    return edu
+
+
+edu = sim_edu(params["N"], params["p_e"], rng)
+
+
+#Check that the simulated education levels match the specified probabilities
+print(np.bincount(edu) / params["N"])
+
+
+#Life-cycle simulation function
+def sim_life(params=None, shock_scale=None, drop_unemployed=False, drop_edu=False, drop_deprecation=False):
+    #drop_x is set to False, as otherwise, it would be true for every individual, and the simulation would not work. 
+    if params is None:
+        params = {
+            "N": 50_000,
+            "p_e": (0.40, 0.35, 0.25),
+            "S_e": (1, 3, 5),
+            "h_e0": (1.00, 1.20, 1.55),
+            "delta_e": (0.010, 0.020, 0.030),
+            "delta": 0.06,
+            "sigma_psi": 0.10,
+            "lambda": 0.60,
+            "sigma": 0.05,
+            "y_su": 0.45,
+            "rho": 0.60,
+            "y_floor": 0.35,
+            "age_start": 18,
+            "age_end": 65,
+            "seed": 2025,
+        }
+
+    p = dict(params) #local copy of parameters
+
+    if shock_scale is not None:
+        p["sigma_psi"] = p["sigma_psi"] * shock_scale #Ensure that the shock scale is applied to the standard deviation of the log-normal distribution for individual productivity shocks
+
+    if drop_deprecation:
+        p["delta"] = 0.0 
+
+    rng = np.random.default_rng(p["seed"])
+    N = p["N"]
+
+    if drop_edu:
+        edu = np.ones(N, dtype=int) #Medium education level for all individuals
+    else:
+        edu = sim_edu(N, p["p_e"], rng)
+
+    #Create arrays for the parameters that depend on education level
+    S_e = np.array(p["S_e"])
+    h_e0 = np.array(p["h_e0"])
+    delta_e = np.array(p["delta_e"])
+
+    S_e_person = S_e[edu] #years of education for each individual
+    h_e0_person = h_e0[edu] #initial human capital for each individual
+    delta_e_person = delta_e[edu] #human capital growth while employed for each individual
+
+    #Create arrays for state parameters 
+    human_capital = np.zeros(N) #human capital for each individual)
+    employed = np.zeros(N, dtype=bool) 
+    active = np.zeros(N, dtype=bool) #True if individual has finished education, False otherwise
+    income_floor = np.full(N,p["y_floor"]) #income floor until first employment, then income floor for unemployed
+
+    ages = range(p["age_start"], p["age_end"] + 1) #relevant ages for the simulation, includes +1, as python excludes the end value in a range.
+    by_age={} #Accumulates snapshot per age as the loop runs through the ages. This is used to create a dataframe for analysis and plotting.
+
+    for age in ages:
+
+        years_since_start = age - p["age_start"] #years since the start of the simulation (age 18)
+        still_in_edu = years_since_start < S_e_person #True if individual is still in education, False otherwise 
+        just_entered_workforce = years_since_start == S_e_person  #True if individual has just finished education, False otherwise
+        active = active | just_entered_workforce #Individuals who have just finished education are now active in the workforce
+    
+
+
+        #Create changes in income based on the state of the individual
+        if still_in_edu.any():
+            human_capital[still_in_edu] = h_e0_person[still_in_edu] #Individuals who are still in education do not accumulate human capital
+        if just_entered_workforce.any():
+            human_capital[just_entered_workforce] = h_e0_person[just_entered_workforce] #Individuals who have just finished education start with their initial human capital
+            employed[just_entered_workforce] = False #Individuals who have just finished education start unemployed
+            income_floor[just_entered_workforce] = p["y_floor"] #Individuals who have just finished education start with the income floor
+        if drop_unemployed: #For Q2.4
+          employed = np.where(active, True, employed) #All active individuals are employed, no unemployment
+        else:
+            draws = rng.random(N) 
+            newly_unemployed = active & employed & (draws < p["sigma"]) #Individuals who are active, employed, and draw a random number less than the probability of losing their job become newly unemployed
+            newly_employed = active & (~employed) & (draws < p["lambda"]) #Individuals who are active, unemployed, and draw a random number less than the probability of finding a job become newly employed
+            employed = np.where(newly_unemployed, False, employed) #Update employment status for newly unemployed individuals
+            employed = np.where(newly_employed, True, employed) #Update employment status for
+
+        #Human capital accumulation and depreciation
+        psi = rng.lognormal(-0.5 * params["sigma_psi"] ** 2, p["sigma_psi"], size=p["N"]) #Individual productivity shocks
+        hc_employed = human_capital * (1 + delta_e_person) * psi 
+        hc_unemployed = human_capital * (1 - p["delta"]) * psi
+        new_hc = np.where(employed, hc_employed, hc_unemployed) #Updates human capital based on employment status
+        human_capital = np.where(active, new_hc, human_capital) #Updates human capital for active individuals
+
+        #Income calculation
+        income = np.where(still_in_edu, p["y_su"], np.where(employed, human_capital, np.maximum(p["rho"]*income_floor, p["y_floor"]))) #Income is student grant if still in education, human capital if employed, or replacement rate of human capital if unemployed
+
+        income_floor = np.where(employed, income, income_floor) #Updates income floor for employed individuals
+
+        by_age[age]={
+            "income": income.copy(),
+            "employed": employed.copy(),
+            "human_capital": human_capital.copy(),
+            "education": edu.copy(),
+            "in_education": still_in_edu.copy(),
+            }
+
+    panel =_build_panel(by_age)
+    return {"by_age": by_age, "panel": panel}
+
+def _build_panel(by_age):
+    #Builds a panel dataframe from the by_age dictionary of arrays
+    frames = [] 
+    for age, state in by_age.items():
+        n = len(state["income"])
+        frames.append(pd.dataframe({
+            "id": np.arrange(n),
+            "age": age,
+            "income": state["income"],
+            "employed": state["employed"],
+            "human_capital": state["human_capital"],
+            "education": state["education"],
+            "in_education": state["in_education"],
+        }))
+    return pd.concat(frames, ignore_index=True)
